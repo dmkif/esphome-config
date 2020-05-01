@@ -7,13 +7,9 @@ esphome:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  power_save_mode: high
+  fast_connect: true
   
-   # Optional manual IP
-  manual_ip:
-    static_ip: 172.18.1.253
-    gateway: 172.18.1.1
-    subnet: 255.255.255.0
-
 # Enable logging
 logger:
 
@@ -23,16 +19,6 @@ api:
 ota:
 
 # Example configuration entry
-i2c:
-  sda: 21
-  scl: 22
-  scan: True
-
-ads1115:
-  - address: 0x48
-sensor:
-  - platform: ads1115
-    multiplexer: 'A0_GND'
-    gain: 4.096
-    name: "ADS1115 Channel A0-GND"
-    update_interval: 100ms 
+deep_sleep:
+  run_duration: 30s
+  sleep_duration: 30s

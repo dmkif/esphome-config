@@ -1,21 +1,21 @@
 esphome:
-  name: temptestesp
+  name: lolinpadawan
   platform: ESP32
-  board: esp32doit-devkit-v1
-
+  board: lolin_d32
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  manual_ip:
-    # Set this to the IP of the ESP
-    static_ip: 172.18.1.10
-    # Set this to the IP address of the router. Often ends with .1
-    gateway: 172.18.1.1
-    # The subnet of the network. 255.255.255.0 works for most home networks.
-    subnet: 255.255.255.0
-
+  # Optional manual IP
+  #manual_ip:
+  #  static_ip: 172.18.1.20
+  #  gateway: 172.18.1.2
+  #  subnet: 255.255.255.0 
+  # Enable Fast Connect
+  fast_connect: True
+  
 # Enable logging
 logger:
+  #level: VERY_VERBOSE
 
 # Enable Home Assistant API
 api:
@@ -27,7 +27,10 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
-    
+
+# Enable Webserver
+#web_server:
+#  port: 80
 # Example configuration entry
 i2c:
   sda: 21
@@ -37,14 +40,14 @@ i2c:
 # Example configuration entry
 switch:
   - platform: gpio
-    pin: GPIO13
+    pin: GPIO26
     name: "Reset CCS811"
     restore_mode: ALWAYS_ON
   - platform: gpio
-    pin: GPIO12
-    name: "NWAKE CCS811"
+    pin: GPIO25
+    name: "WAKEUP CCS811"
     restore_mode: ALWAYS_OFF
-  
+
 # Example configuration entry
 sensor:
   - platform: hdc1080
@@ -54,8 +57,10 @@ sensor:
     humidity:
       id: hdc_humi
       name: "HDC1080 Humidity"
+      filters:
+      - offset: -10.0
     address: 0x40
-    update_interval: 20s
+    update_interval: 30s
   - platform: ccs811
     eco2:
       name: "CCS811 eCO2 Value"
@@ -64,58 +69,110 @@ sensor:
       name: "CCS811 Total Volatile Organic Compound"
       id: tvoc
     address: 0x5A
-    update_interval: 20s
-    temperature: hdc_temp
-    humidity: hdc_humi
+    update_interval: 10s
+    temperature: bme680_temp
+    humidity: bme680_hum
+    #wakeuppin: GPIO25
   - platform: bme680
     temperature:
       name: "BME680 Temperature"
+      id: bme680_temp
       oversampling: 16x
     pressure:
       name: "BME680 Pressure"
+      id: bme680_press
     humidity:
       name: "BME680 Humidity"
+      id: bme680_hum
     gas_resistance:
       name: "BME680 Gas Resistance"
+      id: bme680_gas
     address: 0x77
-    update_interval: 20s
-  - platform: sgp30
-    eco2:
-      name: "Workshop eCO2"
-      accuracy_decimals: 1
-    tvoc:
-      name: "Workshop TVOC"
-      accuracy_decimals: 1
-    compensation:
-      temperature_source: hdc_temp
-      humidity_source: hdc_humi
-    address: 0x58
-    update_interval: 20s
-    
+    update_interval: 10s
+  - platform: bme680
+    temperature:
+      name: "BME680-2 Temperature"
+      oversampling: 16x
+    pressure:
+      name: "BME680-2 Pressure"
+    humidity:
+      name: "BME680-2 Humidity"
+    gas_resistance:
+      name: "BME680-2 Gas Resistance"
+    address: 0x76
+    update_interval: 10s
+  # - platform: sgp30
+  #   eco2:
+  #     name: "SGP30 eCO2"
+  #     accuracy_decimals: 1
+  #   tvoc:
+  #     name: "SGP30 TVOC"
+  #     accuracy_decimals: 1
+  #   compensation:
+  #     temperature_source: bme680_temp
+  #     humidity_source: bme680_hum
+  #   address: 0x58
+  #   update_interval: 60s
 text_sensor:  
   - platform: template
-    name: "Livingroom IAQ"
+    name: "BME680 IAQ"
+    icon: "mdi:air-filter"
+    lambda: |-
+      float base_temp = 21.00;
+      float base_hum = 40.00;
+      float base_rest = 5.00;
+      
+      //float iaq_res = ((79 - id(bme680_temp).state)/(79*3.3))+((60-id(bme680_hum).state)/(60*5.6))+((id(bme680_gas).state / base_rest)*4.9);
+      float iaq_res = ((100-base_temp-id(bme680_temp).state)/(100-base_temp)*(0.047*100))+((100-base_hum-id(bme680_hum).state)/(100-base_hum)*(0.08*100))+((id(bme680_gas).state/5000)*(0.7*100));
+      
+      ESP_LOGD("main", "Current BME680 values temp: %f hum: %f gas: %f", id(bme680_temp).state,id(bme680_hum).state,id(bme680_gas).state);
+      ESP_LOGD("main", "Current BME680 IAQ index %f", iaq_res);
+      ESP_LOGD("main", "Current BME680 IAQ index %d", iaq_res);
+      
+      if (iaq_res <= 50) {
+        return {"extreme Unhealty"};
+      }
+      else if (iaq_res <= 100) {
+        return {"Unhealty"};
+      }
+      else if (iaq_res <= 150) {
+        return {"Poor"};
+      }
+      else if (iaq_res <= 200) {
+        return {"Moderate"};
+      }
+      else if (iaq_res <= 300) {
+        return {"Good"};
+      }
+      else if (iaq_res > 300) {
+        return {"Excellent"};
+      }
+      return {};
+    update_interval: 30s
+      
+  - platform: template
+    name: "CCS811 Livingroom IAQ"
     icon: "mdi:air-filter"
     lambda: |-
       id(iaq_index) = 0;
       
-      /*
-       * Transform indoor humidity values to IAQ points according to Indoor Air Quality UK: 
-       * http://www.iaquk.org.uk/
-       */
-      if (id(hdc_humi).state < 10 or id(hdc_humi).state > 90) {
+      //*
+      //* Transform indoor humidity values to IAQ points according to Indoor Air Quality UK: 
+      // * http://www.iaquk.org.uk/
+      //*/
+      if (id(bme680_hum).state < 10 or id(bme680_hum).state > 90) {
         id(iaq_index) += 1;
       }
-      else if (id(hdc_humi).state < 20 or id(hdc_humi).state > 80) {
+      else if (id(bme680_hum).state < 20 or id(bme680_hum).state > 80) {
         id(iaq_index) += 2;
       }
-      else if (id(hdc_humi).state < 30 or id(hdc_humi).state > 70) {
+      else if (id(bme680_hum).state < 30 or id(bme680_hum).state > 70) {
         id(iaq_index) += 3;
       }
-      else if (id(hdc_humi).state < 40 or id(hdc_humi).state > 60) {
+      else if (id(bme680_hum).state < 40 or id(bme680_hum).state > 60) {
         id(iaq_index) += 4;
       }
-      else if (id(hdc_humi).state >= 40 and id(hdc_humi).state <= 60) {
+      else if (id(bme680_hum).state >= 40 and id(bme680_hum).state <= 60) {
         id(iaq_index) += 5;
       }
       
@@ -182,4 +239,9 @@ text_sensor:
       }
       
       return {};
-    update_interval: 60s
+    update_interval: 30s
+  
+# Example configuration entry
+#deep_sleep:
+#  run_duration: 40s
+#  sleep_duration: 55s
